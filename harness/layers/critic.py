@@ -13,14 +13,14 @@ siết thêm một điều kiện provenance cho vòng hidden: một claim chỉ
 khi nó khớp nguyên văn MỘT DÒNG của một tài liệu mà agent đã quan sát toàn
 văn sạch. Search snippet hoặc nội dung chưa fetch không đủ.
 
-REAL-MODEL HARDENING: model thật thường chọn một quotation quá hẹp dù đã
-retrieve đúng source. Đây là failure class tổng quát, không phụ thuộc brief,
-doc id hay answer key. Sau khi đã đọc ít nhất một full document trên đường
-real-model, critic thêm một one-turn nudge yêu cầu claim là một CONTIGUOUS
-EVIDENCE SPAN trong đúng một dòng. Span có thể chứa nhiều câu liền nhau nếu
-cần để giữ đủ con số, điều kiện, phạm vi, hiệu lực hoặc ngoại lệ. Nudge chỉ
-hướng dẫn model chọn span; critic vẫn không bao giờ nối corpus text vào claim
-sau FINAL nên provenance không bị phá.
+REAL-MODEL HARDENING: với model thật, lỗi lớn không chỉ là fabrication mà
+còn là FINAL quá sớm hoặc chọn evidence span quá hẹp. Critic vì vậy dùng
+`wrap_model_call` đúng nghĩa reflection: khi model chuẩn bị nộp FINAL trên
+đường real-model, critic cho model tối đa hai lượt tự kiểm tra bằng chính
+question + history + observations nó đã thấy. Lượt phản tư có thể trả FINAL
+đã sửa hoặc ACTION để search/fetch sâu hơn. Critic không tự sinh claim từ
+corpus và không sửa claim text sau khi model viết, nên model provenance vẫn
+được giữ nguyên.
 
 RANH GIỚI VỚI `citation_checker`: citation checker chạy trước ở chiều
 `after_agent` và sửa `doc_id`; critic không viết lại claim text. Critic chỉ
@@ -29,13 +29,10 @@ giữ, xoá, hoặc cắt claim thành các substring vốn đã nằm trong out
 
 from __future__ import annotations
 
+from arena.model import parse_output
 from harness.middleware import Middleware
 
 
-# MockModel ghép contradiction bằng " và ", nhưng model thật có thể dùng
-# các liên từ tương đương. Ta chỉ chấp nhận một phép tách nếu HAI nửa đều
-# map được độc lập về HAI full document khác nhau đã quan sát, nên mở rộng
-# separator không biến thành split heuristic mù.
 CONTRADICTION_SEPARATORS = (
     " và ",
     ", nhưng ",
@@ -51,25 +48,50 @@ CONTRADICTION_SEPARATORS = (
 )
 
 
-# Chỉ bật trên đường real-model đã opt-in prompt addendum. Public mock mặc
-# định không mang marker này, nên practice ladder không bị tăng token vô ích.
 _REAL_PROMPT_MARKER = "PHỤ LỤC GIAO THỨC — BẮT BUỘC"
+_MAX_REAL_REFLECTIONS = 2
 
-# General real-model guidance. Không nhắc brief id, doc id, required fact,
-# public answer hay scorer internals. Mục tiêu chỉ là làm rõ wire contract:
-# claim là một đoạn trích liên tục trong một dòng, KHÔNG bắt buộc chỉ một câu.
-EVIDENCE_SPAN_NUDGE = (
-    "NHẮC VỀ CLAIM CHO FINAL: Mỗi claim là một ĐOẠN TRÍCH NGUYÊN VĂN LIÊN "
-    "TỤC từ đúng MỘT DÒNG của tài liệu đã đọc bằng fetch_doc; claim KHÔNG "
-    "bắt buộc chỉ gồm một câu. Nếu nhiều câu hoặc mệnh đề liền nhau trên cùng "
-    "dòng đều cần thiết để bằng chứng tự đứng vững, hãy giữ chúng trong cùng "
-    "span. Khi chọn span, giữ đầy đủ các con số và qualifier có liên quan như "
-    "phạm vi áp dụng, phiên bản/hiệu lực, điều kiện, ngoại lệ, phòng ban và "
-    "thời hạn. Chỉ cắt ở hai đầu của span; không thêm, đổi, chuẩn hoá hay sửa "
-    "bất kỳ ký tự nào. Giữ span đủ ngắn để nằm trong giới hạn claim của giao "
-    "thức, nhưng đừng rút gọn chỉ còn phần trả lời trực tiếp nếu việc đó làm "
-    "mất context quan trọng của chính bằng chứng."
+_OLD_CLAIM_HEADING = "D. MỖI PHẦN TỬ claims LÀ MỘT CÂU CHÉP NGUYÊN VĂN."
+_NEW_CLAIM_HEADING = (
+    "D. MỖI PHẦN TỬ claims LÀ MỘT ĐOẠN TRÍCH NGUYÊN VĂN LIÊN TỤC."
 )
+_OLD_CLAIM_LIMIT = "Mỗi câu trích không quá 400 ký tự."
+_NEW_CLAIM_LIMIT = "Mỗi đoạn trích không quá 400 ký tự."
+
+REFLECTION_PROMPT = """TỰ PHÊ BÌNH FINAL VỪA VIẾT TRƯỚC KHI NỘP.
+Đừng dựa vào answer key hay suy đoán; chỉ dùng question và các observation đã nhận.
+
+1. Kiểm tra TRUY XUẤT: nếu bằng chứng hiện tại chưa đủ, đừng abstain/finalize quá sớm. Hãy trả ACTION để search lại bằng một truy vấn KHÁC, cụ thể hơn (tên chính sách/quy trình/phòng ban/loại văn bản), rồi fetch_doc tài liệu hứa hẹn nhất nếu ngân sách còn cho phép.
+2. Kiểm tra ĐỘ PHỦ: claims phải cùng nhau đỡ MỌI phần factual của câu trả lời — đặc biệt con số, thời hạn, phòng ban, điều kiện, ngoại lệ, phạm vi và trạng thái hiện hành. Đừng chỉ trích câu ngắn nhất nếu nó làm mất qualifier quan trọng.
+3. Kiểm tra SPAN: mỗi claim là một substring NGUYÊN VĂN liên tục trong đúng MỘT DÒNG của tài liệu đã fetch. Một claim có thể gồm NHIỀU CÂU liền nhau trên cùng dòng. Nếu một dòng liên quan chứa nhiều mệnh đề cần thiết và không quá giới hạn, ưu tiên một span đủ rộng thay vì tách thành nhiều claim ngắn không tự bao phủ dữ kiện.
+4. Kiểm tra CHỌN NGUỒN: bỏ claim không phục vụ câu hỏi. Nếu nhiều tài liệu đã fetch thực sự mâu thuẫn về cùng một dữ kiện, nêu riêng cả hai phía với claim/doc_id tương ứng thay vì âm thầm chọn một phía.
+5. Nếu có verdict/kết luận suy ra, verdict phải đi kèm các claim bằng chứng cần thiết; verdict đúng nhưng không có evidence vẫn chưa hoàn chỉnh.
+
+Nếu sau kiểm tra đã đủ bằng chứng, hãy viết lại FINAL theo đúng system format. Nếu chưa đủ và còn ngân sách tool, hãy trả ACTION search/fetch tiếp theo; không lặp lại truy vấn cũ."""
+
+
+def _canonical_final(text: str) -> dict | None:
+    """Parse a real-model FINAL using the same normaliser the agent trusts."""
+    try:
+        from arena.scorer import _canonicalise_output
+
+        text = _canonicalise_output(text)
+    except Exception:
+        pass
+    parsed = parse_output(text)
+    if parsed.kind == "final" and isinstance(parsed.final, dict):
+        return parsed.final
+    return None
+
+
+def _real_prompt_enabled(messages: list[dict]) -> bool:
+    if not isinstance(messages, list) or not messages:
+        return False
+    first = messages[0]
+    if not isinstance(first, dict):
+        return False
+    content = first.get("content")
+    return isinstance(content, str) and _REAL_PROMPT_MARKER in content
 
 
 class Critic(Middleware):
@@ -77,29 +99,80 @@ class Critic(Middleware):
 
     name = "critic"
 
-    def before_model(self, ctx, messages):
-        """Clarify evidence-span selection for real models after full fetch.
+    def before_agent(self, ctx) -> None:
+        """Remove one contradictory wording from the real-model system prompt."""
+        if not isinstance(ctx.messages, list) or not ctx.messages:
+            return
+        first = ctx.messages[0]
+        if not isinstance(first, dict):
+            return
+        content = first.get("content")
+        if not isinstance(content, str) or _REAL_PROMPT_MARKER not in content:
+            return
+        content = content.replace(_OLD_CLAIM_HEADING, _NEW_CLAIM_HEADING)
+        content = content.replace(_OLD_CLAIM_LIMIT, _NEW_CLAIM_LIMIT)
+        ctx.messages[0] = {**first, "content": content}
+        ctx.state.setdefault("critic_search_queries", [])
+        ctx.state.setdefault("critic_fetched_docs", [])
+        ctx.state.setdefault("critic_real_reflections", 0)
 
-        The message is appended to the COPY passed through `before_model`, so
-        it is one-turn guidance rather than permanent history. It fires only
-        on the explicit real-model/addendum path and only after at least one
-        complete corpus document has actually been observed.
-        """
-        if not isinstance(messages, list) or not messages:
-            return messages
+    def wrap_tool_call(self, ctx, call, name, args):
+        """Remember successful logical searches/fetches for the reflection pass."""
+        result = call(name, args)
+        if not getattr(result, "ok", False):
+            return result
 
-        system = messages[0].get("content") if isinstance(messages[0], dict) else ""
-        if not isinstance(system, str) or _REAL_PROMPT_MARKER not in system:
-            return messages
+        if name == "search":
+            query = args.get("query") if isinstance(args, dict) else None
+            if isinstance(query, str) and query.strip():
+                queries = ctx.state.setdefault("critic_search_queries", [])
+                if query not in queries:
+                    queries.append(query)
+        elif name == "fetch_doc":
+            doc_id = args.get("doc_id") if isinstance(args, dict) else None
+            if isinstance(doc_id, str) and doc_id:
+                fetched = ctx.state.setdefault("critic_fetched_docs", [])
+                if doc_id not in fetched:
+                    fetched.append(doc_id)
+        return result
 
-        corpus = ctx.corpus
-        observed = ctx.observed_text
-        if corpus is None or not observed:
-            return messages
-        if not any(doc.body in observed for doc in corpus.docs):
-            return messages
+    def wrap_model_call(self, ctx, call, messages):
+        """Give real-model FINALs one bounded self-critique before acceptance."""
+        response = call(messages)
+        if not _real_prompt_enabled(messages):
+            return response
 
-        return messages + [{"role": "user", "content": EVIDENCE_SPAN_NUDGE}]
+        used = int(ctx.state.get("critic_real_reflections", 0) or 0)
+        if used >= _MAX_REAL_REFLECTIONS:
+            return response
+
+        text = getattr(response, "text", None)
+        if not isinstance(text, str) or _canonical_final(text) is None:
+            return response
+
+        ctx.state["critic_real_reflections"] = used + 1
+        searches = ctx.state.get("critic_search_queries", [])
+        fetched = ctx.state.get("critic_fetched_docs", [])
+        max_calls = ctx.max_tool_calls
+        if isinstance(max_calls, (int, float)):
+            useful_left = max(0, int(max_calls - getattr(ctx.tools, "calls", 0) - 1))
+        else:
+            useful_left = -1
+
+        status = (
+            f"\nTRẠNG THÁI RUN: đã dùng {len(searches)} truy vấn search khác nhau; "
+            f"đã fetch toàn văn {len(fetched)} tài liệu; "
+            + (
+                f"còn tối đa khoảng {useful_left} tool call hữu ích trước submit."
+                if useful_left >= 0
+                else "tool budget không khai báo rõ."
+            )
+        )
+        followup = list(messages) + [
+            {"role": "assistant", "content": text},
+            {"role": "user", "content": REFLECTION_PROMPT + status},
+        ]
+        return call(followup)
 
     def after_agent(self, ctx, report):
         claims = report.get("claims")
@@ -148,21 +221,14 @@ class Critic(Middleware):
             if not isinstance(text, str) or not text:
                 continue
 
-            # Stronger hidden-benchmark signal than `text in observed`:
-            # require a complete observed document and one-line support.
             if source_for(text) is not None:
                 kept.append(claim)
                 continue
 
-            # A fused contradiction is not present in any document as a
-            # whole, but its two halves may each be exact substrings that
-            # the model wrote from different observed sources.
             split = split_conflict(claim, text)
             if split:
                 kept.extend(split)
                 report["abstain"] = True
-
-            # Otherwise the claim has no full-document evidence: drop it.
 
         report["claims"] = kept
         if not kept:
