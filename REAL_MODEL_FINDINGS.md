@@ -87,7 +87,7 @@ Một số hard cases vượt token budget ~1.25–1.36x. Nhưng grounding đang
 
 Commit: `6bb4bb37f916c3f59bc1e28047394891d24dd434`
 
-Thay vì thêm heuristic riêng cho từng public case, `Critic.wrap_model_call()` giờ thực hiện reflection tổng quát trên real-model path:
+Thay vì thêm heuristic riêng cho từng public case, `Critic.wrap_model_call()` thực hiện reflection tổng quát trên real-model path:
 
 1. model tạo FINAL bình thường;
 2. nếu FINAL parse được, critic cho model một genuine model call nữa để tự audit FINAL;
@@ -95,33 +95,30 @@ Thay vì thêm heuristic riêng cho từng public case, `Critic.wrap_model_call(
 4. model có thể trả FINAL đã sửa hoặc ACTION search/fetch sâu hơn;
 5. tối đa hai reflection/run để tránh loop và giới hạn token cost.
 
-Reflection checklist chỉ hỏi các failure class tổng quát:
+### Kết quả full public sau reflection
 
-- đã search/re-query đủ sâu chưa;
-- claims có cover mọi factual clause của answer/question chưa;
-- span có đủ qualifier/con số/thời hạn/phòng ban không;
-- có split một source line thành các claim quá ngắn không;
-- có claim thừa không;
-- có nhiều fetched source mâu thuẫn mà chỉ nêu một phía không;
-- verdict có supporting claims hay không.
+Reflection tổng quát chỉ cải thiện mạnh pub-05 (`100.00`) và nhẹ pub-02; đa số grounding vẫn bằng 0. Các case có claim `SUPPORTED` nhưng recall 0 chứng minh vấn đề không phải citation guard mà là evidence span chưa cover fact. Vì reflection chạy trên mọi FINAL nên nó còn tốn token dù không có tín hiệu rõ ràng cần sửa.
 
-`Critic.before_agent()` đồng thời sửa ambiguity system prompt từ `một CÂU chép nguyên văn` thành `một ĐOẠN TRÍCH NGUYÊN VĂN LIÊN TỤC`; không thay question, corpus hay answer.
+---
 
-`Critic.wrap_tool_call()` chỉ ghi lại số distinct search/fetch thành công vào `ctx.state` để reflection biết run đã tìm sâu tới đâu. Không hard-code brief/doc id.
+## Improvement 9 — issue-driven reflection
 
-### Test tiếp theo
+Commit: `2f6d887b90f7066d24efa39a81ef4f2ecfe46733`
 
-Chạy lại full public trước, không sửa giữa các brief:
+Reflection được đổi từ "tự phê bình chung" sang chỉ bật khi runtime phát hiện một failure class có thể kiểm tra mà không cần answer key:
 
-```bash
-python scripts/run_practice_luna.py \
-  --model real \
-  --layers all \
-  --prompt-addendum \
-  --entry luong-quoc-khanh \
-  --out runs/luna-public-reflection.json
+- `PARTIAL_LINE`: claim là exact substring của một full document đã fetch, nhưng chỉ lấy một phần của dòng trong khi toàn dòng <= 500 ký tự. Critic không mở rộng claim; nó yêu cầu model đọc lại observation và tự quote toàn dòng trong genuine model output.
+- `EARLY_ABSTAIN`: FINAL abstain/không có claim khi mới dùng dưới hai distinct search và budget vẫn còn. Model được yêu cầu đọc lại fetched docs; nếu chưa có line trực tiếp thì phải refined search bằng query khác.
 
-python scripts/selfeval.py --run runs/luna-public-reflection.json
-```
+System prompt real-model cũng được làm rõ: nếu một dòng liên quan <= 500 ký tự thì ưu tiên quote nguyên toàn dòng, không split thành nhiều claim ngắn. Đây là rule tổng quát bám scorer contract (`one-line quotation`, max claim chars), không biết `brief_id`, `doc_id`, `required_facts`, `supporting_doc_ids` hay verdict answer key.
 
-Sau đó mới chạy shadow set. So sánh theo failure class và mean, không chase riêng từng public score.
+### Mục tiêu test tiếp theo
+
+Chạy nguyên full 9 public một lần, không tune giữa từng brief. Cần kiểm tra:
+
+- pub-01/02/06/07: `SUPPORTED + recall 0` có chuyển thành covering claim khi model quote full line không;
+- pub-03/08/09: empty/abstain có tạo refined search thứ hai không;
+- pub-04: reflection trên partial line có giúp surface đủ hai phía contradiction không;
+- pub-05: không regress từ 100 nếu claims đã đủ.
+
+Nếu issue-driven reflection vẫn không cải thiện mean grounding rõ rệt, rollback model-level reflection và chuyển trọng tâm sang retrieval/planning ở agent thay vì tiếp tục thêm prompt heuristic.
