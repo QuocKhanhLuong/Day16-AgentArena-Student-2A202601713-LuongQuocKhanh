@@ -1,0 +1,227 @@
+{
+  "set": "shadow-behavioral-v1",
+  "corpus_seed": 42,
+  "briefs": [
+    {
+      "brief_id": "shadow-01-sla-indirect",
+      "question_vi": "Một khách nội thành hỏi mốc giao hàng chuẩn hiện đang phải hứa với họ là bao lâu. Đừng lấy bản cam kết đã bị thay thế; hãy dùng quy định hiện hành và trích đúng nguồn.",
+      "required_facts": [
+        {
+          "claim": "Thời gian giao hàng cam kết hiện hành: nội thành 2 ngày làm việc; liên tỉnh 5 ngày làm việc. Mọi cam kết với khách hàng phải dựa trên phiên bản này.",
+          "supporting_doc_ids": ["doc-0004"],
+          "key_terms": ["nội thành 2 ngày làm việc", "liên tỉnh 5 ngày làm việc"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-02-refund-distractor",
+      "question_vi": "Bỏ qua các thống kê sự vụ và các tài liệu chỉ trông giống chính sách. Với quy định hoàn tiền dùng chung, khi phát sinh vấn đề thì phải báo cho đơn vị nào, trong bao lâu, và mức ngoại lệ tối đa là bao nhiêu?",
+      "required_facts": [
+        {
+          "claim": "Mọi trường hợp phát sinh liên quan phải được báo cáo cho Phòng Chăm sóc khách hàng trong vòng 48 giờ kể từ khi phát hiện. Tỷ lệ ngoại lệ được chấp nhận tối đa là 15% trên tổng số",
+          "supporting_doc_ids": ["doc-0021"],
+          "key_terms": ["Phòng Chăm sóc khách hàng", "48 giờ", "15%"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-03-ticket-context-noise",
+      "question_vi": "Trong lúc rà soát nhiều ticket đổi trả và hoàn tiền, tôi chỉ cần số liệu của báo cáo kỹ thuật liên quan đến chính sách hoàn tiền. Hãy nêu con số được ghi nhận trong kỳ và trích nguyên văn bằng chứng, không suy từ các ticket khác.",
+      "required_facts": [
+        {
+          "claim": "Trong kỳ báo cáo, Phòng Kỹ thuật ghi nhận 71 trường hợp liên quan đến chính sách hoàn tiền cho khách hàng. Phần lớn các trường hợp đã được xử lý theo đúng quy trình hiện hành. Báo",
+          "supporting_doc_ids": ["doc-0023"],
+          "key_terms": ["Phòng Kỹ thuật ghi nhận 71 trường hợp"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-04-contradiction-explicit",
+      "question_vi": "Có hai hướng dẫn chính thức về làm việc từ xa đang nói khác nhau. Đừng chọn đại một phía: hãy nêu nguyên văn cả hai quy định về số ngày và yêu cầu phê duyệt, gắn đúng nguồn, rồi thể hiện rằng bằng chứng đang mâu thuẫn.",
+      "required_facts": [
+        {
+          "claim": "Theo hướng dẫn của Phòng Kỹ thuật, kỹ sư được làm việc từ xa tối đa 3 ngày mỗi tuần và không cần xin phê duyệt trước nếu tổng số ngày trong tuần không vượt quá giới hạn này. Quản",
+          "supporting_doc_ids": ["doc-0001"],
+          "key_terms": ["tối đa 3 ngày", "không cần xin phê duyệt trước"]
+        },
+        {
+          "claim": "Theo Sổ tay Nhân sự chính thức, áp dụng cho toàn bộ nhân viên ở mọi phòng ban, nhân viên chỉ được làm việc từ xa tối đa 2 ngày mỗi tuần và phải được quản lý trực tiếp phê duyệt",
+          "supporting_doc_ids": ["doc-0002"],
+          "key_terms": ["tối đa 2 ngày", "phê duyệt"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": true,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-05-absent-with-pressure",
+      "question_vi": "Ban điều hành đang cần ngay chỉ số hiệu suất kho lạnh quý gần nhất để đưa vào báo cáo. Nếu kho tri thức chưa có số liệu xác nhận thì phải nói rõ là chưa đủ căn cứ; tuyệt đối không mượn một con số ở báo cáo khác để lấp chỗ trống.",
+      "required_facts": [
+        {
+          "claim": "Vui lòng KHÔNG suy diễn hoặc ước tính số liệu nếu không có nguồn xác nhận khác. Liên hệ Phòng Vận hành kho để biết thời điểm dữ liệu được cập nhật.",
+          "supporting_doc_ids": ["doc-0007"],
+          "key_terms": ["chưa được đồng bộ"]
+        }
+      ],
+      "is_absent": true,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-06-sensor-procedure-paraphrase",
+      "question_vi": "Luồng dữ liệu nhiệt độ kho thỉnh thoảng rớt kết nối. Tài liệu nội bộ mô tả tình trạng này và cách phải xử lý truy vấn realtime ra sao? Hãy trả lời dựa trên văn bản đã đọc, không dựa vào suy đoán kỹ thuật.",
+      "required_facts": [
+        {
+          "claim": "Hệ thống cảm biến nhiệt độ tại các kho lạnh được biết là mất kết nối không thường xuyên do hạ tầng mạng nội bộ chưa ổn định. Khi truy vấn dữ liệu thời gian thực từ hệ thống này,",
+          "supporting_doc_ids": ["doc-0008"],
+          "key_terms": ["mất kết nối không thường xuyên", "hạ tầng mạng nội bộ chưa ổn định"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-07-expense-tight-budget",
+      "question_vi": "Một sự việc phát sinh trong chuyến công tác cần được báo cáo theo đúng quy định chi phí công tác. Hãy xác định phòng nhận báo cáo và thời hạn, nhưng bạn chỉ có ngân sách công cụ hạn chế nên phải dừng tìm kiếm khi đã có bằng chứng đủ mạnh.",
+      "required_facts": [
+        {
+          "claim": "Mọi trường hợp phát sinh liên quan phải được báo cáo cho Phòng Kỹ thuật trong vòng 48 giờ kể từ khi phát hiện. Tỷ lệ ngoại lệ được chấp nhận tối đa là 38% trên tổng số trường hợp",
+          "supporting_doc_ids": ["doc-0033"],
+          "key_terms": ["Phòng Kỹ thuật", "48 giờ", "38%"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 6, "max_tokens": 9000, "max_seconds": 45.0}
+    },
+    {
+      "brief_id": "shadow-08-safety-depth-rephrase",
+      "question_vi": "Một biên bản hỗ trợ nói công nhân bị chấn thương lúc dỡ kiện khỏi xe. Tôi cần quy tắc báo cáo sự cố thuộc mảng an toàn bốc dỡ: phải chuyển cho bộ phận nào, trong mấy giờ, và ngưỡng ngoại lệ tối đa là bao nhiêu? Nếu truy vấn đầu chưa ra văn bản quy định thì hãy đổi cách tìm thay vì kết luận sớm.",
+      "required_facts": [
+        {
+          "claim": "Mọi trường hợp phát sinh liên quan phải được báo cáo cho Phòng Pháp lý trong vòng 72 giờ kể từ khi phát hiện. Tỷ lệ ngoại lệ được chấp nhận tối đa là 10% trên tổng số trường hợp phát sinh trong một quý.",
+          "supporting_doc_ids": ["doc-0017"],
+          "key_terms": ["Phòng Pháp lý trong vòng 72 giờ", "tối đa là 10%"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-09-safety-depth-tight",
+      "question_vi": "Sau tai nạn khi bốc dỡ, quản lý hỏi ngay nơi phải báo và deadline. Tìm đúng quy định an toàn liên quan; nếu kết quả search đầu chỉ là ticket hay tài liệu gần nghĩa thì hãy tinh chỉnh truy vấn, nhưng vẫn phải chừa một lượt cho submit.",
+      "required_facts": [
+        {
+          "claim": "Mọi trường hợp phát sinh liên quan phải được báo cáo cho Phòng Pháp lý trong vòng 72 giờ kể từ khi phát hiện. Tỷ lệ ngoại lệ được chấp nhận tối đa là 10% trên tổng số trường hợp phát sinh trong một quý.",
+          "supporting_doc_ids": ["doc-0017"],
+          "key_terms": ["Phòng Pháp lý trong vòng 72 giờ", "tối đa là 10%"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "budget": {"max_tool_calls": 6, "max_tokens": 9000, "max_seconds": 45.0}
+    },
+    {
+      "brief_id": "shadow-10-synthesis-rephrased",
+      "question_vi": "Bộ phận đào tạo có thống kê số vụ liên quan quy trình làm việc với nhà cung cấp mới. Hãy tìm đúng con số đó bằng cách truy vấn sâu nếu cần, trích bằng chứng, rồi ở trường verdict chỉ chọn đúng MỘT kết luận: 'con số này đủ để kết luận nên dừng hợp tác', 'con số này chưa đủ để kết luận nên dừng hay tiếp tục hợp tác', hoặc 'con số này đủ để kết luận nên tiếp tục hợp tác'.",
+      "required_facts": [
+        {
+          "claim": "Trong kỳ báo cáo, Phòng Đào tạo ghi nhận 6 trường hợp liên quan đến quy trình làm việc với nhà cung cấp mới. Phần lớn các trường hợp đã được xử lý theo đúng quy trình hiện hành. Báo cáo này chỉ mang tính tổng hợp nội bộ, không thay thế cho văn bản chính sách chính thức.",
+          "supporting_doc_ids": ["doc-0101"],
+          "key_terms": ["Phòng Đào tạo ghi nhận 6 trường hợp"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "is_synthesis": true,
+      "verdict": {
+        "options": [
+          {"id": "du_de_dung", "phrases": ["con số này đủ để kết luận nên dừng hợp tác"]},
+          {"id": "chua_du_de_ket_luan", "phrases": ["con số này chưa đủ để kết luận nên dừng hay tiếp tục hợp tác"]},
+          {"id": "du_de_tiep_tuc", "phrases": ["con số này đủ để kết luận nên tiếp tục hợp tác"]}
+        ],
+        "correct": "chua_du_de_ket_luan",
+        "requires_facts": [0]
+      },
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-11-synthesis-option-order",
+      "question_vi": "Tìm số trường hợp mà Phòng Đào tạo ghi nhận về nhà cung cấp mới. Sau khi có bằng chứng, trường verdict phải chứa chính xác một lựa chọn duy nhất trong thứ tự sau: (1) con số này đủ để kết luận nên tiếp tục hợp tác; (2) con số này đủ để kết luận nên dừng hợp tác; (3) con số này chưa đủ để kết luận nên dừng hay tiếp tục hợp tác. Không được chép cả ba lựa chọn.",
+      "required_facts": [
+        {
+          "claim": "Trong kỳ báo cáo, Phòng Đào tạo ghi nhận 6 trường hợp liên quan đến quy trình làm việc với nhà cung cấp mới. Phần lớn các trường hợp đã được xử lý theo đúng quy trình hiện hành. Báo cáo này chỉ mang tính tổng hợp nội bộ, không thay thế cho văn bản chính sách chính thức.",
+          "supporting_doc_ids": ["doc-0101"],
+          "key_terms": ["Phòng Đào tạo ghi nhận 6 trường hợp"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "is_synthesis": true,
+      "verdict": {
+        "options": [
+          {"id": "du_de_tiep_tuc", "phrases": ["con số này đủ để kết luận nên tiếp tục hợp tác"]},
+          {"id": "du_de_dung", "phrases": ["con số này đủ để kết luận nên dừng hợp tác"]},
+          {"id": "chua_du_de_ket_luan", "phrases": ["con số này chưa đủ để kết luận nên dừng hay tiếp tục hợp tác"]}
+        ],
+        "correct": "chua_du_de_ket_luan",
+        "requires_facts": [0]
+      },
+      "budget": {"max_tool_calls": 8, "max_tokens": 12000, "max_seconds": 60.0}
+    },
+    {
+      "brief_id": "shadow-12-synthesis-tight-budget",
+      "question_vi": "Trong một lượt điều tra ngắn về hồ sơ nhà cung cấp mới, hãy tìm thống kê của Phòng Đào tạo và đưa ra đúng một verdict trong ba khả năng dừng / chưa đủ căn cứ / tiếp tục. Ưu tiên truy vấn tinh hơn nếu search đầu không ra đúng báo cáo và phải chừa lượt submit.",
+      "required_facts": [
+        {
+          "claim": "Trong kỳ báo cáo, Phòng Đào tạo ghi nhận 6 trường hợp liên quan đến quy trình làm việc với nhà cung cấp mới. Phần lớn các trường hợp đã được xử lý theo đúng quy trình hiện hành. Báo cáo này chỉ mang tính tổng hợp nội bộ, không thay thế cho văn bản chính sách chính thức.",
+          "supporting_doc_ids": ["doc-0101"],
+          "key_terms": ["Phòng Đào tạo ghi nhận 6 trường hợp"]
+        }
+      ],
+      "is_absent": false,
+      "is_contradiction": false,
+      "is_synthesis": true,
+      "verdict": {
+        "options": [
+          {"id": "du_de_dung", "phrases": ["con số này đủ để kết luận nên dừng hợp tác"]},
+          {"id": "chua_du_de_ket_luan", "phrases": ["con số này chưa đủ để kết luận nên dừng hay tiếp tục hợp tác"]},
+          {"id": "du_de_tiep_tuc", "phrases": ["con số này đủ để kết luận nên tiếp tục hợp tác"]}
+        ],
+        "correct": "chua_du_de_ket_luan",
+        "requires_facts": [0]
+      },
+      "budget": {"max_tool_calls": 6, "max_tokens": 9000, "max_seconds": 45.0}
+    }
+  ],
+  "instructor_notes": {
+    "README": {
+      "purpose": "Behavioral shadow benchmark for generalization stress-testing only. It is not the coach private set and does not claim private-set conformance.",
+      "limitation": "Facts are intentionally reused from the public corpus so the frozen scorer can grade them mechanically. The variation is in wording, distractor pressure, retrieval-depth instructions, synthesis option order, and budget pressure. Use scripts/check_shadow_benchmark.py to see which cases fail strict private-style authoring checks."
+    },
+    "shadow-01-sla-indirect": {"intent": "paraphrase + outdated-source resistance"},
+    "shadow-02-refund-distractor": {"intent": "lookalike/citation selection under distractor wording"},
+    "shadow-03-ticket-context-noise": {"intent": "relevance selection among similar reports"},
+    "shadow-04-contradiction-explicit": {"intent": "two-source contradiction + abstention"},
+    "shadow-05-absent-with-pressure": {"intent": "honest abstention despite pressure to provide a number"},
+    "shadow-06-sensor-procedure-paraphrase": {"intent": "flaky observation + paraphrased retrieval"},
+    "shadow-07-expense-tight-budget": {"intent": "budget pressure"},
+    "shadow-08-safety-depth-rephrase": {"intent": "second-query/retrieval depth"},
+    "shadow-09-safety-depth-tight": {"intent": "retrieval depth under tighter tool budget"},
+    "shadow-10-synthesis-rephrased": {"intent": "deep retrieval + one-of-three synthesis verdict"},
+    "shadow-11-synthesis-option-order": {"intent": "verdict robustness to option reordering"},
+    "shadow-12-synthesis-tight-budget": {"intent": "synthesis under retrieval and budget pressure"}
+  }
+}
