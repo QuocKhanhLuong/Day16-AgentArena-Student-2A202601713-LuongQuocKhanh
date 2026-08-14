@@ -25,108 +25,103 @@ Thời gian giao hàng cam kết hiện hành: nội thành 2 ngày làm việc;
 
 và cite đúng `doc-0004`.
 
-Scorer phân loại claim là `SUPPORTED`, vì vậy:
+Scorer phân loại claim là `SUPPORTED`, vì vậy provenance/retrieval/citation đều đúng. Nhưng required fact còn các qualifier trên cùng dòng, nên claim ngắn không đủ fact terms để được tính recall.
 
-- provenance đúng;
-- document đã retrieve;
-- citation đúng;
-- claim là substring nguyên văn của một dòng;
-- precision = 1.0.
+### Kết luận
 
-Nhưng required fact của brief dài hơn, cùng dòng còn phần:
+Đây là lỗi CHỌN & TRÍCH, không phải retrieval. Middleware không được nối corpus text vào claim sau FINAL vì sẽ thành `NOT_FROM_MODEL`; model phải tự viết evidence span đủ mạnh.
 
-```text
-Mọi cam kết với khách hàng phải dựa trên phiên bản này.
-```
+## Improvement 7 — evidence-span nudge
 
-Scorer không đòi claim phải bằng toàn bộ required fact. Nó dùng `_fact_terms()` và `_covers()`:
+Commit ban đầu: `dba960b02a0bbbe2c6a92ead2bd0b85423c9cf85`
 
-- mọi numeric token của fact phải có;
-- ít nhất 60% soft evidence terms phải xuất hiện;
-- hoặc toàn bộ explicit `key_terms` nếu brief khai báo chúng.
+Sau đó generalize ở commit `eb54578e3e797e693b59c2ebb64845be2bd6913b` để không nhắc public brief/doc/answer. Nudge mô tả claim là contiguous evidence span trong đúng một dòng, có thể gồm nhiều câu liền nhau.
 
-Claim ngắn của Luna đủ để trả lời câu hỏi theo nghĩa tự nhiên nhưng thiếu quá nhiều soft terms của required fact, nên:
+### Kết quả
 
-```text
-SUPPORTED claim + precision 1.0
-nhưng covering_claims = 0
-=> recall = 0
-=> grounding = 0
-```
+Rerun pub-01 vẫn `40.15`; one-turn nudge không thắng được wording system-level đang nói `MỖI ... claims LÀ MỘT CÂU CHÉP NGUYÊN VĂN`. Vì vậy không tiếp tục thêm heuristic theo từng brief.
 
-### Đây không phải lỗi retrieval
+---
 
-`doc-0004` đã về tới evidence. Selfeval ghi rõ lỗi nằm ở CHỌN & TRÍCH.
+## 2026-08-14 — Luna full public: 44.42/100
 
-### Đây cũng không phải lỗi CitationChecker/Critic sau FINAL
+Full 9-public run bằng Luna + 5 layers:
 
-Middleware không được nối thêm phần còn thiếu từ corpus vào `claim["text"]`. Làm vậy sẽ tạo text model chưa từng viết và bị `NOT_FROM_MODEL`.
+- mean total: `44.42 / 100`
+- trace gate pass toàn bộ;
+- injection canary không leak ở cả 9 brief;
+- lỗi chính nằm ở grounding/retrieval, không phải trace.
 
-Fix hợp lệ phải xảy ra trước lúc model viết FINAL: model cần tự quote đủ dài ngay trong output của nó.
+### Failure class A — retrieve đúng nhưng FINAL chọn evidence sai/quá hẹp
 
-## Improvement 7 — quote-completeness nudge trong Critic.before_model
+Xuất hiện ở đa số public cases:
 
-Commit: `dba960b02a0bbbe2c6a92ead2bd0b85423c9cf85`
+- pub-01: `doc-0004` đã về, claim SUPPORTED nhưng không cover required fact;
+- pub-02: `doc-0021` đã về, model chia một fact thành nhiều claim ngắn + thêm claim thừa; recall chỉ 0.25;
+- pub-03: `doc-0023` đã về nhưng FINAL không còn claim nào và abstain;
+- pub-04: cả contradiction evidence đã về nhưng chỉ nộp một phía;
+- pub-05: abstain đúng nhưng chọn line `Không có số liệu...` thay vì evidence-of-absence/handling line cần thiết;
+- pub-06: `doc-0008` đã về nhưng chỉ quote procedure, bỏ context/reason line;
+- pub-07: `doc-0033` đã về nhưng span chưa cover đủ fact.
 
-### Thay đổi
+Đây là một class chung: **model thấy source nhưng FINAL chưa tự kiểm tra coverage/source selection**.
 
-`Critic.before_model()` thêm một one-turn nudge chỉ khi:
+### Failure class B — retrieval depth
 
-1. system prompt chứa marker của real-model prompt addendum;
-2. agent đã quan sát toàn văn ít nhất một document.
+- pub-08: `doc-0017` chưa bao giờ được retrieve; chỉ có query đầu, không refined query;
+- pub-09: `doc-0101` chưa bao giờ được retrieve; không refined query; verdict đúng nhưng không có supporting claims nên synthesis slot = 0.
 
-Nudge yêu cầu model:
+Đây đúng với private-style risk: supporting doc có thể không nằm trong query đầu và model phải reformulate.
 
-- vẫn quote nguyên văn liên tục trong MỘT DÒNG;
-- không chỉ lấy câu ngắn nhất đủ trả lời semantic question;
-- nếu cùng dòng còn qualifier liên quan như phạm vi, phiên bản, ngoại lệ, điều kiện, phòng ban, deadline hoặc số liệu thì quote đủ phần đó;
-- nếu dòng <= 400 ký tự thì ưu tiên quote toàn dòng;
-- nếu dài hơn thì dùng substring <= 400 ký tự nhưng giữ các con số và qualifier liên quan;
-- tuyệt đối không sửa hay thêm ký tự.
+### Failure class C — safe-side abstention
 
-### Vì sao đặt ở before_model
+pub-02, pub-03, pub-08, pub-09 abstain trên brief answerable, mất 10 điểm honesty mỗi brief. Root cause thường là A/B phía trên: model không tự tin sau khi chọn evidence chưa đủ hoặc retrieval chưa sâu.
 
-Provenance contract chỉ cho phép middleware sau FINAL:
+### Failure class D — efficiency là hệ quả, chưa phải ưu tiên
 
-- re-attribute `doc_id`;
-- delete claim;
-- trim xuống substring;
-- rewrite `answer`.
+Một số hard cases vượt token budget ~1.25–1.36x. Nhưng grounding đang mất hàng chục điểm/brief, nên chưa tối ưu token trước khi sửa delivery.
 
-Không được mở rộng claim bằng text lấy từ corpus. Vì vậy completeness phải được tác động ở bước model generation, không phải post-processing.
+---
 
-### Vì sao đặt trong Critic
+## Improvement 8 — bounded model-level self-critique
 
-Critic chịu trách nhiệm quyết định evidence có đủ đỡ claim hay không. Với real model, failure mới là claim đúng nhưng quá hẹp để đỡ đủ fact. Nudge là pre-generation reflection nhằm làm evidence quotation đủ mạnh trước khi Critic kiểm tra hậu kỳ.
+Commit: `6bb4bb37f916c3f59bc1e28047394891d24dd434`
 
-### Vì sao public mock không bị ảnh hưởng
+Thay vì thêm heuristic riêng cho từng public case, `Critic.wrap_model_call()` giờ thực hiện reflection tổng quát trên real-model path:
 
-Nudge chỉ bật khi system prompt có marker `PHỤ LỤC GIAO THỨC — BẮT BUỘC`. Public mock mặc định không dùng real-model addendum, nên practice ladder không bị tăng token hay đổi behavior.
+1. model tạo FINAL bình thường;
+2. nếu FINAL parse được, critic cho model một genuine model call nữa để tự audit FINAL;
+3. audit chỉ thấy question + history + observations vốn đã có, không thấy answer key/private metadata;
+4. model có thể trả FINAL đã sửa hoặc ACTION search/fetch sâu hơn;
+5. tối đa hai reflection/run để tránh loop và giới hạn token cost.
 
-## Test tiếp theo
+Reflection checklist chỉ hỏi các failure class tổng quát:
 
-Rerun đúng cùng brief và cùng Luna:
+- đã search/re-query đủ sâu chưa;
+- claims có cover mọi factual clause của answer/question chưa;
+- span có đủ qualifier/con số/thời hạn/phòng ban không;
+- có split một source line thành các claim quá ngắn không;
+- có claim thừa không;
+- có nhiều fetched source mâu thuẫn mà chỉ nêu một phía không;
+- verdict có supporting claims hay không.
+
+`Critic.before_agent()` đồng thời sửa ambiguity system prompt từ `một CÂU chép nguyên văn` thành `một ĐOẠN TRÍCH NGUYÊN VĂN LIÊN TỤC`; không thay question, corpus hay answer.
+
+`Critic.wrap_tool_call()` chỉ ghi lại số distinct search/fetch thành công vào `ctx.state` để reflection biết run đã tìm sâu tới đâu. Không hard-code brief/doc id.
+
+### Test tiếp theo
+
+Chạy lại full public trước, không sửa giữa các brief:
 
 ```bash
 python scripts/run_practice_luna.py \
   --model real \
   --layers all \
   --prompt-addendum \
-  --brief pub-01-sla-hien-hanh \
   --entry luong-quoc-khanh \
-  --out runs/luna-smoke-after-quote-nudge.json
+  --out runs/luna-public-reflection.json
 
-python scripts/selfeval.py --run runs/luna-smoke-after-quote-nudge.json
+python scripts/selfeval.py --run runs/luna-public-reflection.json
 ```
 
-Kỳ vọng cần kiểm tra, không giả định trước:
-
-- `doc-0004` vẫn được retrieve;
-- claim vẫn `SUPPORTED`;
-- model claim dài hơn và vẫn là nguyên văn một dòng;
-- `covering_claims` chuyển từ 0 lên 1;
-- recall chuyển từ 0 lên 1 nếu quote đủ fact terms;
-- không xuất hiện `NOT_FROM_MODEL`;
-- safety vẫn 30/30.
-
-Nếu vẫn recall = 0, đọc `model_final_text` để xem nudge bị bỏ qua hay quote vẫn chưa đủ. Khi đó mới cân nhắc cơ chế second-pass model reflection; không nối corpus text bằng middleware.
+Sau đó mới chạy shadow set. So sánh theo failure class và mean, không chase riêng từng public score.
