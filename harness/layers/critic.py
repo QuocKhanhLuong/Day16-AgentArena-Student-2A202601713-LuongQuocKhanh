@@ -79,16 +79,73 @@ class Critic(Middleware):
     name = "critic"
 
     def after_agent(self, ctx, report):
-        # TODO (§2): khoảng 10-25 dòng.
-        #  1. Lấy report["claims"]; nếu rỗng hoặc không phải list thì thôi.
-        #  2. Với mỗi claim: nếu claim["text"] có trong ctx.observed_text
-        #     -> giữ nguyên (KHÔNG sửa chữ).
-        #  3. Nếu không: thử tách câu ghép (trường hợp (c) ở docstring).
-        #     Tách được -> giữ cả hai nửa, mỗi nửa gắn doc_id của tài liệu
-        #     thật sự chứa nó, và đặt report["abstain"] = True.
-        #  4. Không tách được -> đây là bịa: bỏ claim đi.
-        #  5. Nếu không còn claim nào: report["abstain"] = True,
-        #     claims = [], citations = [], và viết lại "answer" nói rõ là
-        #     không đủ căn cứ.
-        #  6. Cập nhật report["citations"] cho khớp với claims còn lại.
-        return report  # <- mặc định KHÔNG LÀM GÌ: agent vẫn chạy được
+        claims = report.get("claims")
+        if not isinstance(claims, list):
+            return report
+
+        observed = ctx.observed_text
+        corpus = ctx.corpus
+        kept: list[dict] = []
+
+        def source_for(fragment: str, exclude: str | None = None) -> str | None:
+            if not fragment or corpus is None:
+                return None
+            for doc in corpus.docs:
+                if doc.doc_id == exclude or doc.body not in observed:
+                    continue
+                if any(fragment in line for line in doc.body.splitlines()):
+                    return doc.doc_id
+            return None
+
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            text = claim.get("text")
+            if not isinstance(text, str) or not text:
+                continue
+            if text in observed:
+                kept.append(claim)
+                continue
+
+            split_done = False
+            offset = 0
+            separator = " và "
+            while True:
+                cut = text.find(separator, offset)
+                if cut < 0:
+                    break
+                left = text[:cut].strip()
+                right = text[cut + len(separator) :].strip()
+                left_doc = source_for(left)
+                right_doc = source_for(right, exclude=left_doc)
+                if (
+                    left_doc
+                    and right_doc
+                    and left in observed
+                    and right in observed
+                ):
+                    kept.append({**claim, "text": left, "doc_id": left_doc})
+                    kept.append({**claim, "text": right, "doc_id": right_doc})
+                    report["abstain"] = True
+                    split_done = True
+                    break
+                offset = cut + 1
+
+            if split_done:
+                continue
+
+        report["claims"] = kept
+        if not kept:
+            report["abstain"] = True
+            report["citations"] = []
+            report["answer"] = "Không đủ căn cứ từ các tài liệu đã quan sát để kết luận."
+            return report
+
+        report["citations"] = sorted(
+            {
+                claim.get("doc_id")
+                for claim in kept
+                if isinstance(claim.get("doc_id"), str) and claim.get("doc_id")
+            }
+        )
+        return report
