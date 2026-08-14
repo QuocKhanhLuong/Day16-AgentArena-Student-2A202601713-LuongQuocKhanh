@@ -53,12 +53,21 @@ class CitationChecker(Middleware):
             if not isinstance(text, str) or not text:
                 continue
 
+            # A citation is only trusted when the run has observed the FULL
+            # document cleanly. Merely knowing a corpus doc contains the text
+            # is not enough: search snippets / unretrieved docs do not satisfy
+            # the scorer's provenance requirement on hidden briefs.
             cited = corpus.get(claim.get("doc_id"))
-            if cited is not None and self._matches_line(cited.body, text):
-                continue
-            if text not in observed:
+            if (
+                cited is not None
+                and cited.body in observed
+                and self._matches_line(cited.body, text)
+            ):
                 continue
 
+            # Re-attribute only to a document whose full body actually reached
+            # the agent and whose single line contains the model's exact text.
+            # Keep claim["text"] byte-for-byte unchanged.
             for doc in corpus.docs:
                 if doc.body in observed and self._matches_line(doc.body, text):
                     claim["doc_id"] = doc.doc_id
