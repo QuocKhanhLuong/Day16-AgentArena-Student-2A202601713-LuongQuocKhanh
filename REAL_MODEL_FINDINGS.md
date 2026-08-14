@@ -107,18 +107,40 @@ Commit: `2f6d887b90f7066d24efa39a81ef4f2ecfe46733`
 
 Reflection được đổi từ "tự phê bình chung" sang chỉ bật khi runtime phát hiện một failure class có thể kiểm tra mà không cần answer key:
 
-- `PARTIAL_LINE`: claim là exact substring của một full document đã fetch, nhưng chỉ lấy một phần của dòng trong khi toàn dòng <= 500 ký tự. Critic không mở rộng claim; nó yêu cầu model đọc lại observation và tự quote toàn dòng trong genuine model output.
-- `EARLY_ABSTAIN`: FINAL abstain/không có claim khi mới dùng dưới hai distinct search và budget vẫn còn. Model được yêu cầu đọc lại fetched docs; nếu chưa có line trực tiếp thì phải refined search bằng query khác.
+- `PARTIAL_LINE`: claim là exact substring của một full document đã fetch, nhưng chỉ lấy một phần của dòng trong khi toàn dòng <= 500 ký tự.
+- `EARLY_ABSTAIN`: FINAL abstain/không có claim khi mới dùng dưới hai distinct search và budget vẫn còn.
 
-System prompt real-model cũng được làm rõ: nếu một dòng liên quan <= 500 ký tự thì ưu tiên quote nguyên toàn dòng, không split thành nhiều claim ngắn. Đây là rule tổng quát bám scorer contract (`one-line quotation`, max claim chars), không biết `brief_id`, `doc_id`, `required_facts`, `supporting_doc_ids` hay verdict answer key.
+### Kết quả issue-driven full public
 
-### Mục tiêu test tiếp theo
+- pub-01: G 0, R 0, P 1, `SUPPORTED:1`
+- pub-02: G 10.3, R .25, P .75, `SUPPORTED:3 + IRRELEVANT:1`
+- pub-03: G 0, no claims
+- pub-04: G 27.5, R .5, P 1
+- pub-05: G 41.2, R .75, P 1
+- pub-06: G 0, R 0, P 1, `SUPPORTED:1`
+- pub-07: G 0, R 0, P 1, `SUPPORTED:1`
+- pub-08: G 0, no claims
+- pub-09: G 0, no claims
 
-Chạy nguyên full 9 public một lần, không tune giữa từng brief. Cần kiểm tra:
+Kết luận: issue-driven reflection cũng không tạo cải thiện grounding ổn định. Nó tăng complexity nhưng vẫn để nguyên hai failure class chính: evidence selection và retrieval depth.
 
-- pub-01/02/06/07: `SUPPORTED + recall 0` có chuyển thành covering claim khi model quote full line không;
-- pub-03/08/09: empty/abstain có tạo refined search thứ hai không;
-- pub-04: reflection trên partial line có giúp surface đủ hai phía contradiction không;
-- pub-05: không regress từ 100 nếu claims đã đủ.
+---
 
-Nếu issue-driven reflection vẫn không cải thiện mean grounding rõ rệt, rollback model-level reflection và chuyển trọng tâm sang retrieval/planning ở agent thay vì tiếp tục thêm prompt heuristic.
+## Improvement 10 — bỏ reflection loop, chuyển sang planning protocol
+
+Commit: `25c48b598ad5b355f9946cafdbd1b2ea25b09c26`
+
+`Critic` quay lại đúng vai trò chính: validate/delete/split model-written claims sau FINAL. Không còn extra model calls và không còn bookkeeping search/fetch trong critic.
+
+Trên real-model path, `Critic.before_agent()` chỉ clarifies system protocol một lần bằng quy trình tổng quát `DISCOVER → VERIFY → FINALIZE`:
+
+1. search chỉ tìm candidate, không dùng snippet làm claim;
+2. phải `fetch_doc` trước FINAL;
+3. nếu candidate/fetch đầu chưa có line trực tiếp đỡ phần cốt lõi, bắt buộc refined search bằng query khác;
+4. source line dùng làm evidence và dài <=500 ký tự thì model phải quote nguyên toàn line; dài hơn thì contiguous substring <=500 giữ đủ qualifier;
+5. bỏ claim không phục vụ câu hỏi; nếu fetched docs mâu thuẫn thì nộp cả hai phía; synthesis verdict phải có supporting claims;
+6. trước FINAL, mọi factual clause trong answer phải xuất hiện trong ít nhất một claim.
+
+Runtime rule không biết `brief_id`, `doc_id`, `required_facts`, `supporting_doc_ids`, public answer hay verdict answer key.
+
+Nếu planner protocol này vẫn không nâng Grounding trên full public/shadow, bước tiếp theo không phải prompt tuning nữa mà là redesign agent planning/retrieval policy có state machine rõ ràng.
