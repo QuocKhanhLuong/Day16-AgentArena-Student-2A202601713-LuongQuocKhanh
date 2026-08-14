@@ -4,43 +4,65 @@
 
 Lần thử qua `scripts/luna_compat_proxy.py` trả HTTP 401. Proxy không phải một phần của Lab 16 và cũng không cần thiết để test middleware, nên đã bỏ để giảm thêm một tầng mạng và tránh nhầm lẫn giữa lỗi agent với lỗi test infrastructure.
 
-## Lỗi API thực sự đã xác nhận
+## Các lỗi API compatibility đã quan sát
 
-Gọi trực tiếp OpenAI bằng `gpt-5.6-luna` cho thấy request tới đúng endpoint nhưng bị HTTP 400 vì frozen `arena/model.py` gửi trường legacy:
+Gọi trực tiếp OpenAI bằng `gpt-5.6-luna` cho thấy request tới đúng endpoint nhưng frozen `arena/model.py` gửi payload theo assumptions cũ.
 
-```text
-max_tokens
-```
-
-Luna yêu cầu:
+Lỗi đầu tiên đã xác nhận bằng response body của OpenAI:
 
 ```text
-max_completion_tokens
+Unsupported parameter: 'max_tokens' is not supported with this model.
+Use 'max_completion_tokens' instead.
 ```
 
-Điều này chứng minh API key/base URL/model ID đều đã đi tới OpenAI; lỗi là compatibility của payload.
-
-## Cách test mới: in-process compatibility shim
-
-Không sửa `arena/model.py` vì đây là instructor-owned/frozen code. Thay vào đó dùng:
-
-```text
-scripts/run_practice_luna.py
-```
-
-Script này vẫn gọi chính `scripts.run_practice.main()` và giữ nguyên runner, scorer, tools, trace, briefs, middleware và `RealModel.complete()`.
-
-Nó chỉ patch `RealModel._post()` trong process hiện tại để đổi đúng một field ở payload trước khi request đi ra mạng:
+Do đó local Luna path đổi:
 
 ```text
 max_tokens -> max_completion_tokens
 ```
 
-Patch biến mất ngay khi process kết thúc. Không proxy, không localhost HTTP hop, không sửa prompt, không sửa response, không sửa report, không sửa score.
+Sau thay đổi này request vẫn trả HTTP 400 nhưng frozen `_post()` chỉ in `HTTP Error 400` và nuốt mất response body. Frozen client cũng luôn gửi:
 
-### Vì sao đổi tên thay vì bỏ hẳn giới hạn token
+```text
+temperature = 0.0
+```
 
-Bỏ hoàn toàn `max_tokens` sẽ làm Luna dùng giới hạn output mặc định của API và khiến local test lệch thêm khỏi budget mà frozen lab muốn áp. Đổi sang `max_completion_tokens` giữ ý nghĩa của giới hạn gần nhất có thể với frozen client, đồng thời tương thích Luna.
+Local Luna test path hiện bỏ `temperature` khỏi request và để Luna dùng sampling/default mode được API hỗ trợ. Đồng thời local shim tự đọc response body khi có HTTP error để nếu còn incompatibility tiếp theo, log sẽ chỉ thẳng `param/code/message` thay vì một lỗi 400 mơ hồ.
+
+## Cách test: in-process compatibility shim
+
+Không sửa `arena/model.py` vì đây là instructor-owned/frozen code. Dùng:
+
+```text
+scripts/run_practice_luna.py
+```
+
+Script vẫn gọi chính `scripts.run_practice.main()` và giữ nguyên:
+
+- runner;
+- scorer;
+- tools;
+- trace;
+- briefs;
+- middleware;
+- `RealModel.complete()` và parsing response.
+
+Nó chỉ patch `RealModel._post()` trong process hiện tại để chuẩn hoá transport payload trước khi gọi trực tiếp OpenAI:
+
+```text
+max_tokens -> max_completion_tokens
+remove temperature=0.0
+```
+
+Patch biến mất ngay khi process kết thúc. Không proxy, không localhost HTTP hop, không sửa prompt, response, report hay score.
+
+### Vì sao không bỏ hẳn giới hạn token
+
+Bỏ hoàn toàn giới hạn output sẽ làm local test lệch thêm khỏi budget mà frozen lab muốn áp. Đổi tên sang `max_completion_tokens` giữ semantics gần nhất với frozen client.
+
+### Vì sao bỏ temperature
+
+`temperature=0.0` không phải một phần của scorer/harness contract; nó chỉ là sampling parameter do frozen API client gửi. Local compatibility runner không cần ép sampling value này nếu model endpoint không chấp nhận/không cần nó. Agent logic, prompt và evidence flow không đổi.
 
 ## Chạy
 
@@ -67,6 +89,8 @@ Sau đó:
 ```bash
 python scripts/selfeval.py --run runs/luna-smoke.json
 ```
+
+Nếu còn lỗi API, `run_practice_luna.py` hiện sẽ in cả JSON error body từ OpenAI. Gửi nguyên dòng `Luna API HTTP ...` để xác định chính xác incompatibility tiếp theo.
 
 Nếu smoke pass, test lần lượt contradiction / depth / synthesis:
 
