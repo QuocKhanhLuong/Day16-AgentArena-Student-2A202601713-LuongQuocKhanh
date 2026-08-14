@@ -153,9 +153,121 @@ Không chỉ nhìn `mean_total`. Đọc theo thứ tự:
 
 ---
 
+## 2026-08-14 — Real-model compatibility + shadow benchmark
+
+### 4. Luna compatibility proxy: test model thật mà không sửa `arena/`
+
+**Lỗi quan sát được**
+
+`RealModel` frozen gửi `max_tokens`, trong khi GPT-5.6 Luna trả HTTP 400 và yêu cầu `max_completion_tokens`. API key/env không có lỗi; request đã tới đúng OpenAI endpoint.
+
+**Giải pháp**
+
+Thêm `scripts/luna_compat_proxy.py`, một proxy localhost chỉ dành cho test. Nó:
+
+- giữ nguyên messages/model/output;
+- forward nguyên Authorization header, không log key;
+- đổi `max_tokens -> max_completion_tokens`;
+- nếu upstream trả đúng lỗi `unsupported_parameter` cho `temperature`, retry một lần sau khi bỏ `temperature`;
+- không import vào harness/scored path;
+- không sửa `arena/model.py`.
+
+Flow:
+
+```text
+Frozen RealModel
+    -> localhost:8765/v1/chat/completions
+    -> compatibility rewrite only
+    -> api.openai.com/v1/chat/completions
+    -> GPT-5.6 Luna
+```
+
+**Commit**: `ad540d1ba9fc40e9f112c02a43aa9647dabddc51`
+
+### 5. Shadow behavioral benchmark: kiểm tra generalization ngoài 9 câu public
+
+Thêm `benchmarks/shadow_hidden.json` gồm 12 case biến đổi theo các trục:
+
+- paraphrase câu hỏi;
+- distractor/context noise;
+- contradiction;
+- pressure-to-answer trên absent case;
+- tighter tool budget;
+- retrieval depth / re-query;
+- synthesis verdict;
+- đổi thứ tự các verdict option.
+
+**Quan trọng:** đây là **behavioral shadow set**, không phải bản sao private benchmark. Các fact được reuse từ public corpus để frozen scorer vẫn chấm cơ học được. Mục tiêu là tạo domain shift ở wording/control flow chứ không giả vờ biết answer của private set.
+
+**Commit**: `0c995f40e9bfa523d6c24b059e6b178ecb838d35`
+
+### 6. Benchmark authoring checker: phân biệt behavioral test với private-style conformance
+
+Thêm `scripts/check_shadow_benchmark.py` để chạy chính các helper frozen trong `arena.briefs`:
+
+- `schema_problems`;
+- `acceptance_problems` = schema + uniqueness/depth + enumerability + verdict checks;
+- `dispersion_problems` ở cấp cả set;
+- top retrieval hits và trap classes.
+
+Nhờ vậy ta không tự đánh lừa mình rằng mọi custom case đều giống private benchmark. Một case có thể hữu ích để stress behavior nhưng vẫn bị đánh dấu `BEHAVIORAL` nếu không đạt strict authoring contract.
+
+**Commit**: `33f6de1c1748a44a5887a08da86759cb439643b9`
+
+### Chạy Luna qua proxy
+
+Terminal 1:
+
+```bash
+python scripts/luna_compat_proxy.py
+```
+
+Terminal 2:
+
+```bash
+export ARENA_API_KEY="sk-..."
+export ARENA_BASE_URL="http://127.0.0.1:8765/v1"
+export ARENA_MODEL="gpt-5.6-luna"
+
+python scripts/run_practice.py \
+  --model real \
+  --layers all \
+  --prompt-addendum \
+  --brief pub-01-sla-hien-hanh \
+  --out runs/luna-smoke.json
+```
+
+### Kiểm tra shadow benchmark trước khi chạy
+
+```bash
+python scripts/check_shadow_benchmark.py
+```
+
+`--strict` chỉ dùng khi muốn command fail nếu bất kỳ case nào không đạt private-style authoring checks:
+
+```bash
+python scripts/check_shadow_benchmark.py --strict
+```
+
+### Chạy full shadow set bằng Luna
+
+```bash
+python scripts/run_practice.py \
+  --model real \
+  --layers all \
+  --prompt-addendum \
+  --briefs benchmarks/shadow_hidden.json \
+  --entry luong-quoc-khanh \
+  --out runs/luna-shadow.json
+```
+
+Vì `selfeval.py` cố tình chỉ giải thích bộ `public`, shadow set đọc qua output của `run_practice.py`, file JSON diagnostics, và leaderboard; không sửa `selfeval.py` để lách boundary này.
+
+---
+
 ## Chưa làm / cần đo trước khi sửa tiếp
 
-- Chưa thay BudgetPolicy/Retry: hiện chưa thấy hidden-specific bug rõ ràng; cần real-model trace trước.
+- Chưa thay BudgetPolicy/Retry: hiện chưa thấy hidden-specific bug rõ ràng; cần Luna trace trước.
 - Chưa tối ưu theo public score: public leaderboard chỉ dùng để regression/debug.
-- Chưa hard-code bất kỳ public brief/doc nào.
-- Chưa tạo shadow-hidden brief; chỉ làm nếu real-model run cho thấy cần stress retrieval depth/synthesis riêng.
+- Không hard-code bất kỳ public brief/doc nào trong **runtime harness**. Shadow benchmark được phép reuse public facts vì nó là test fixture, không phải agent logic.
+- Shadow set hiện stress model behavior trên corpus seed 42; chưa tuyên bố đạt strict private-style conformance. Dùng `scripts/check_shadow_benchmark.py` để đo khoảng cách này trước khi diễn giải score.
