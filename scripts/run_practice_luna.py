@@ -1,70 +1,90 @@
 #!/usr/bin/env python3
 """Run Agent Arena against GPT-5.6 Luna without changing frozen `arena/`.
 
-This is LOCAL TEST INFRA only.
+LOCAL TEST INFRA ONLY.
 
-Why it exists
--------------
-The frozen `arena.model.RealModel.complete()` builds a Chat Completions payload
-with the legacy field `max_tokens`. GPT-5.6 Luna accepts Chat Completions but
-requires `max_completion_tokens` instead.
+The frozen `arena.model.RealModel.complete()` sends a Chat Completions payload
+with two assumptions that are not suitable for the Luna test path:
 
-Rather than editing `arena/model.py` or inserting an HTTP proxy, this script
-patches only the outgoing payload in memory for this process:
+1. `max_tokens` is legacy for Luna; use `max_completion_tokens`.
+2. the frozen client always sends `temperature=0.0`; for this Luna test path we
+   omit sampling temperature and let the model use its supported/default mode.
 
-    max_tokens -> max_completion_tokens
+Nothing else in the arena is replaced: the normal practice CLI, runner, tools,
+trace, scorer, briefs, middleware, and RealModel response parsing remain the
+same. The shim exists only inside this Python process and disappears on exit.
 
-Everything else remains on the normal practice path:
-- the original `scripts.run_practice.main` CLI;
-- the original frozen `RealModel.complete()` response parsing/token accounting;
-- the original runner, tools, trace, scorer, briefs, and student middleware;
-- direct HTTPS requests to `ARENA_BASE_URL` (normally OpenAI).
+Unlike the frozen `_post`, this local test shim also includes the upstream HTTP
+error body in a `RealModelError`, so another API-compatibility failure tells us
+which exact parameter is rejected instead of only saying "HTTP 400".
 
-No API key, prompt, model response, claim, citation, report, or score is altered.
-The patch disappears when the process exits.
-
-Usage
------
+Usage:
     export ARENA_API_KEY="sk-..."
     export ARENA_BASE_URL="https://api.openai.com/v1"
     export ARENA_MODEL="gpt-5.6-luna"
 
     python scripts/run_practice_luna.py \
-      --model real \
-      --layers all \
-      --prompt-addendum \
-      --brief pub-01-sla-hien-hanh \
-      --out runs/luna-smoke.json
-
-This script is intentionally NOT imported by the scored path.
+      --model real --layers all --prompt-addendum \
+      --brief pub-01-sla-hien-hanh --out runs/luna-smoke.json
 """
 
 from __future__ import annotations
 
+import json
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 LAB_ROOT = Path(__file__).resolve().parent.parent
 if str(LAB_ROOT) not in sys.path:
     sys.path.insert(0, str(LAB_ROOT))
 
-from arena.model import RealModel  # noqa: E402
-
-
-_ORIGINAL_POST = RealModel._post
+from arena.model import RealModel, RealModelError  # noqa: E402
 
 
 def _post_luna_compatible(self: RealModel, payload: dict) -> dict:
-    """Preserve the frozen payload semantics while using Luna's field name."""
+    """Send the frozen request directly to OpenAI with Luna-only API fixes."""
     compatible = dict(payload)
+
+    # Preserve the frozen output cap semantics, only using Luna's field name.
     if "max_tokens" in compatible and "max_completion_tokens" not in compatible:
         compatible["max_completion_tokens"] = compatible.pop("max_tokens")
-    return _ORIGINAL_POST(self, compatible)
+
+    # `temperature=0.0` is injected unconditionally by the frozen client.
+    # It is not required by the lab contract, so omit it only on this local
+    # Luna compatibility path rather than mutating instructor-owned arena code.
+    compatible.pop("temperature", None)
+
+    url = f"{self.base_url.rstrip('/')}/chat/completions"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(compatible).encode("utf-8"),
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = "<unavailable>"
+        raise RealModelError(
+            f"Luna API HTTP {exc.code} at {url}: {body}"
+        ) from exc
+    except Exception as exc:
+        raise RealModelError(f"Luna API request failed at {url}: {exc}") from exc
 
 
-# Process-local transport compatibility shim. We patch `_post`, not `complete`,
-# so all frozen parsing, usage accounting, errors, and response handling remain
-# exactly the implementation shipped by the lab.
+# Process-local compatibility shim. We patch `_post`, not `complete`, so the
+# frozen parser/token accounting and the rest of the scored mechanics stay in
+# place. This script is never imported by the official scored path.
 RealModel._post = _post_luna_compatible  # type: ignore[method-assign]
 
 from scripts.run_practice import main  # noqa: E402
